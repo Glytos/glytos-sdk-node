@@ -256,13 +256,11 @@ class Workflows {
   /** Start a text/chat session against an agent. */
   startSession(
     workflowUuid: string,
-    variables?: Record<string, unknown>,
-    version?: number | string,
+    body?: { variables?: Record<string, unknown>; version?: number | string },
   ): Promise<Session> {
-    const body: Record<string, unknown> = {};
-    if (variables !== undefined) body.variables = variables;
-    if (version !== undefined) body.version = version;
-    return this.client.request('POST', `/workflows/${enc(workflowUuid)}/sessions`, { body });
+    return this.client.request('POST', `/workflows/${enc(workflowUuid)}/sessions`, {
+      body: body ?? {},
+    });
   }
 
   /** Send one user message to an existing session and get that turn's reply. */
@@ -361,27 +359,19 @@ class PhoneNumbers {
   }
 
   /** Import (connect) a number you already own at a carrier. */
-  importNumber(
-    e164: string,
-    provider?: string,
-    providerSid?: string,
-    credentials?: Record<string, unknown>,
-    workflowUuid?: string,
-  ): Promise<PhoneNumber> {
-    const body: Record<string, unknown> = { e164 };
-    if (provider !== undefined) body.provider = provider;
-    if (providerSid !== undefined) body.provider_sid = providerSid;
-    if (credentials !== undefined) body.credentials = credentials;
-    if (workflowUuid !== undefined) body.workflow_uuid = workflowUuid;
+  importNumber(body: {
+    e164: string;
+    provider?: string;
+    provider_sid?: string;
+    credentials?: Record<string, unknown>;
+    workflow_uuid?: string;
+  }): Promise<PhoneNumber> {
     return this.client.request('POST', '/telephony/numbers/import', { body });
   }
 
   /** Provision a platform "instant" number (query params, no body). */
-  instant(country?: string, provider?: string): Promise<PhoneNumber> {
-    const query: Query = {};
-    if (country !== undefined) query.country = country;
-    if (provider !== undefined) query.provider = provider;
-    return this.client.request('POST', '/telephony/numbers/instant', { query });
+  instant(query?: { country?: string; provider?: string }): Promise<PhoneNumber> {
+    return this.client.request('POST', '/telephony/numbers/instant', { query: query ?? {} });
   }
 }
 
@@ -420,36 +410,26 @@ class Webhooks {
   /** Update a webhook endpoint (only the fields you pass are changed). */
   update(
     endpointId: number | string,
-    url?: string,
-    events?: string[],
-    isActive?: boolean,
-    timeoutSeconds?: number,
-    headers?: Record<string, string>,
-    authHeader?: string,
+    body: {
+      url?: string;
+      events?: string[];
+      is_active?: boolean;
+      timeout_seconds?: number;
+      headers?: Record<string, string>;
+      auth_header?: string;
+    },
   ): Promise<WebhookEndpoint> {
-    const body: Record<string, unknown> = {};
-    if (url !== undefined) body.url = url;
-    if (events !== undefined) body.events = events;
-    if (isActive !== undefined) body.is_active = isActive;
-    if (timeoutSeconds !== undefined) body.timeout_seconds = timeoutSeconds;
-    if (headers !== undefined) body.headers = headers;
-    if (authHeader !== undefined) body.auth_header = authHeader;
     return this.client.request('PATCH', `/webhooks/endpoints/${enc(String(endpointId))}`, { body });
   }
 
   /** List recent webhook deliveries (optionally filtered). */
-  deliveries(
-    eventType?: string,
-    status?: string,
-    limit?: number,
-    offset?: number,
-  ): Promise<WebhookDelivery[]> {
-    const query: Query = {};
-    if (eventType !== undefined) query.event_type = eventType;
-    if (status !== undefined) query.status = status;
-    if (limit !== undefined) query.limit = limit;
-    if (offset !== undefined) query.offset = offset;
-    return this.client.request('GET', '/webhooks/deliveries', { query });
+  deliveries(query?: {
+    event_type?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<WebhookDelivery[]> {
+    return this.client.request('GET', '/webhooks/deliveries', { query: query ?? {} });
   }
 
   /** Re-send a past webhook delivery. */
@@ -481,18 +461,12 @@ class Campaigns {
   }
 
   /** Create an outbound calling campaign. */
-  create(
-    name: string,
-    workflowUuid: string,
-    fromNumber: string,
-    contacts?: Array<Record<string, unknown>>,
-  ): Promise<Campaign> {
-    const body: Record<string, unknown> = {
-      name,
-      workflow_uuid: workflowUuid,
-      from_number: fromNumber,
-    };
-    if (contacts !== undefined) body.contacts = contacts;
+  create(body: {
+    name: string;
+    workflow_uuid: string;
+    from_number: string;
+    contacts?: Array<Record<string, unknown>>;
+  }): Promise<Campaign> {
     return this.client.request('POST', '/telephony/campaigns', { body });
   }
 
@@ -523,15 +497,12 @@ class Chat {
   }
 
   /** Send a chat message (authed by the body token, not the API key). */
-  messages(
-    token: string,
-    content: string,
-    sessionUuid?: string,
-    images?: string[],
-  ): Promise<unknown> {
-    const body: Record<string, unknown> = { token, content };
-    if (sessionUuid !== undefined) body.session_uuid = sessionUuid;
-    if (images !== undefined) body.images = images;
+  messages(body: {
+    token: string;
+    content: string;
+    session_uuid?: string;
+    images?: string[];
+  }): Promise<unknown> {
     return this.client.request('POST', '/chat/messages', { body });
   }
 }
@@ -545,35 +516,27 @@ class Tools {
   }
 
   /** Create a tool. `kind` is `"http"`, `"static"`, or `"mcp"`. */
-  create(
-    name: string,
-    kind: 'http' | 'static' | 'mcp',
-    description?: string,
-    config?: Record<string, unknown>,
-    parameters?: Record<string, unknown>,
-  ): Promise<Tool> {
-    const body: Record<string, unknown> = { name, kind };
-    if (description !== undefined) body.description = description;
-    if (config !== undefined) body.config = config;
-    if (parameters !== undefined) body.parameters = parameters;
+  create(body: {
+    name: string;
+    kind: 'http' | 'static' | 'mcp';
+    description?: string;
+    config?: Record<string, unknown>;
+    parameters?: Record<string, unknown>;
+  }): Promise<Tool> {
     return this.client.request('POST', '/tools', { body });
   }
 
   /** Update a tool (only the fields you pass are changed). */
   update(
     toolUuid: string,
-    name?: string,
-    description?: string,
-    kind?: 'http' | 'static' | 'mcp',
-    config?: Record<string, unknown>,
-    parameters?: Record<string, unknown>,
+    body: {
+      name?: string;
+      description?: string;
+      kind?: 'http' | 'static' | 'mcp';
+      config?: Record<string, unknown>;
+      parameters?: Record<string, unknown>;
+    },
   ): Promise<Tool> {
-    const body: Record<string, unknown> = {};
-    if (name !== undefined) body.name = name;
-    if (description !== undefined) body.description = description;
-    if (kind !== undefined) body.kind = kind;
-    if (config !== undefined) body.config = config;
-    if (parameters !== undefined) body.parameters = parameters;
     return this.client.request('PATCH', `/tools/${enc(toolUuid)}`, { body });
   }
 
@@ -592,29 +555,22 @@ class KnowledgeBase {
   }
 
   /** Add a document (it is chunked and embedded for retrieval). */
-  createDocument(
-    name: string,
-    content: string,
-    chunkSize?: number,
-    chunkOverlap?: number,
-  ): Promise<KnowledgeDocument> {
-    const body: Record<string, unknown> = { name, content };
-    if (chunkSize !== undefined) body.chunk_size = chunkSize;
-    if (chunkOverlap !== undefined) body.chunk_overlap = chunkOverlap;
+  createDocument(body: {
+    name: string;
+    content: string;
+    chunk_size?: number;
+    chunk_overlap?: number;
+  }): Promise<KnowledgeDocument> {
     return this.client.request('POST', '/knowledge-base/documents', { body });
   }
 
   /** Hybrid (vector + full-text) search over your documents. */
-  search(
-    query: string,
-    topK?: number,
-    documentIds?: number[],
-    minScore?: number,
-  ): Promise<unknown[]> {
-    const body: Record<string, unknown> = { query };
-    if (topK !== undefined) body.top_k = topK;
-    if (documentIds !== undefined) body.document_ids = documentIds;
-    if (minScore !== undefined) body.min_score = minScore;
+  search(body: {
+    query: string;
+    top_k?: number;
+    document_ids?: number[];
+    min_score?: number;
+  }): Promise<unknown[]> {
     return this.client.request('POST', '/knowledge-base/search', { body });
   }
 }
@@ -628,8 +584,8 @@ class VectorStores {
   }
 
   /** Create a vector store. */
-  create(name: string): Promise<VectorStore> {
-    return this.client.request('POST', '/vector-stores', { body: { name } });
+  create(body: { name: string }): Promise<VectorStore> {
+    return this.client.request('POST', '/vector-stores', { body });
   }
 
   /** Retrieve a vector store by uuid. */

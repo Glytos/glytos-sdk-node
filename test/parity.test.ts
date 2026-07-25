@@ -47,7 +47,7 @@ describe('workflows parity', () => {
 
   it('startSession omits unprovided optional fields', async () => {
     const capture: Capture = {};
-    await client(capture).workflows.startSession('wf_1', { name: 'Ada' });
+    await client(capture).workflows.startSession('wf_1', { variables: { name: 'Ada' } });
 
     expect(await capture.request!.json()).toEqual({ variables: { name: 'Ada' } });
   });
@@ -56,7 +56,7 @@ describe('workflows parity', () => {
 describe('phoneNumbers parity', () => {
   it('instant sends query params and no body', async () => {
     const capture: Capture = {};
-    await client(capture).phoneNumbers.instant('US', 'twilio');
+    await client(capture).phoneNumbers.instant({ country: 'US', provider: 'twilio' });
 
     expect(capture.request?.method).toBe('POST');
     const url = new URL(capture.request!.url);
@@ -68,7 +68,7 @@ describe('phoneNumbers parity', () => {
 
   it('importNumber sends only the provided fields', async () => {
     const capture: Capture = {};
-    await client(capture).phoneNumbers.importNumber('+15550001111', 'twilio');
+    await client(capture).phoneNumbers.importNumber({ e164: '+15550001111', provider: 'twilio' });
 
     expect(new URL(capture.request!.url).pathname).toMatch(/\/telephony\/numbers\/import$/);
     expect(await capture.request!.json()).toEqual({ e164: '+15550001111', provider: 'twilio' });
@@ -76,9 +76,13 @@ describe('phoneNumbers parity', () => {
 });
 
 describe('campaigns parity', () => {
-  it('create maps positional args to the snake_case body', async () => {
+  it('create posts the snake_case body', async () => {
     const capture: Capture = {};
-    await client(capture).campaigns.create('Launch', 'wf_1', '+15550002222');
+    await client(capture).campaigns.create({
+      name: 'Launch',
+      workflow_uuid: 'wf_1',
+      from_number: '+15550002222',
+    });
 
     expect(capture.request?.method).toBe('POST');
     expect(new URL(capture.request!.url).pathname).toMatch(/\/telephony\/campaigns$/);
@@ -103,7 +107,7 @@ describe('campaigns parity', () => {
 describe('tools parity', () => {
   it('update is a PATCH that omits unprovided fields', async () => {
     const capture: Capture = {};
-    await client(capture).tools.update('tool_1', 'Renamed');
+    await client(capture).tools.update('tool_1', { name: 'Renamed' });
 
     expect(capture.request?.method).toBe('PATCH');
     expect(new URL(capture.request!.url).pathname).toMatch(/\/tools\/tool_1$/);
@@ -115,7 +119,7 @@ describe('tools parity', () => {
 describe('knowledgeBase parity', () => {
   it('search posts the query and optional knobs', async () => {
     const capture: Capture = {};
-    await client(capture, '[]').knowledgeBase.search('refund policy', 5, [1, 2]);
+    await client(capture, '[]').knowledgeBase.search({ query: 'refund policy', top_k: 5, document_ids: [1, 2] });
 
     expect(capture.request?.method).toBe('POST');
     expect(new URL(capture.request!.url).pathname).toMatch(/\/knowledge-base\/search$/);
@@ -142,7 +146,7 @@ describe('analytics parity', () => {
 describe('webhooks parity', () => {
   it('update omits unprovided fields', async () => {
     const capture: Capture = {};
-    await client(capture).webhooks.update(7, undefined, ['call.completed']);
+    await client(capture).webhooks.update(7, { events: ['call.completed'] });
 
     expect(capture.request?.method).toBe('PATCH');
     expect(new URL(capture.request!.url).pathname).toMatch(/\/webhooks\/endpoints\/7$/);
