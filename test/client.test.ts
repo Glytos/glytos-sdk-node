@@ -47,6 +47,20 @@ describe('Glytos', () => {
     expect(new URL(capture.request!.url).search).toBe('?status=completed');
   });
 
+  it('unwraps the paginated {items} envelope for calls.list', async () => {
+    const glytos = new Glytos({
+      apiKey: 'gly_test',
+      fetch: stubFetch(
+        '{"items":[{"uuid":"call_1","status":"completed"}],"total":1,"limit":50,"offset":0}',
+        { status: 200 },
+      ),
+    });
+
+    const calls = await glytos.calls.list();
+
+    expect(calls).toEqual([{ uuid: 'call_1', status: 'completed' }]);
+  });
+
   it('throws GlytosError on a non-2xx response', async () => {
     const glytos = new Glytos({
       apiKey: 'gly_test',

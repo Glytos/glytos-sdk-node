@@ -154,6 +154,17 @@ export interface ChatToken {
 
 const enc = encodeURIComponent;
 
+/**
+ * Normalize a list response to a plain array. Most list endpoints return a bare
+ * array, but the paginated ones wrap results in a `{ items, total, limit, offset }`
+ * envelope; this returns the array either way so the declared return type holds.
+ */
+function toList<T>(resp: unknown): T[] {
+  if (Array.isArray(resp)) return resp as T[];
+  const wrapped = (resp as { items?: unknown } | null | undefined)?.items;
+  return Array.isArray(wrapped) ? (wrapped as T[]) : [];
+}
+
 class Workflows {
   constructor(private readonly client: Glytos) {}
 
@@ -298,9 +309,9 @@ class Calls {
     return this.client.request('POST', '/calls', { body });
   }
 
-  /** List calls. */
+  /** List calls (paginated endpoint; the items are returned). */
   list(query?: Query): Promise<Call[]> {
-    return this.client.request('GET', '/calls', { query });
+    return this.client.request('GET', '/calls', { query }).then((r) => toList<Call>(r));
   }
 
   /** Retrieve a call by uuid. */
@@ -429,7 +440,9 @@ class Webhooks {
     limit?: number;
     offset?: number;
   }): Promise<WebhookDelivery[]> {
-    return this.client.request('GET', '/webhooks/deliveries', { query: query ?? {} });
+    return this.client
+      .request('GET', '/webhooks/deliveries', { query: query ?? {} })
+      .then((r) => toList<WebhookDelivery>(r));
   }
 
   /** Re-send a past webhook delivery. */
