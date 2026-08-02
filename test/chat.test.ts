@@ -178,6 +178,26 @@ describe('folders, imports and uploads', () => {
     expect(new URL(capture.request!.url).pathname).toMatch(/\/agent-folders\/fld_1$/);
   });
 
+  it('files an agent into a folder, and unfiles it with an explicit null', async () => {
+    const capture: Capture = {};
+    const glytos = client(capture);
+
+    await glytos.agents.moveToFolder('wf_1', 'fld_1');
+    expect(capture.request?.method).toBe('PATCH');
+    expect(await capture.request!.json()).toEqual({ folder_uuid: 'fld_1' });
+
+    // "sent as null" is what unfiles an agent; "not sent" would leave it where it is.
+    await glytos.agents.removeFromFolder('wf_1');
+    expect(await capture.request!.json()).toEqual({ folder_uuid: null });
+  });
+
+  it('exports an agent', async () => {
+    const capture: Capture = {};
+    await client(capture).agents.export('wf_1');
+    expect(capture.request?.method).toBe('GET');
+    expect(new URL(capture.request!.url).pathname).toMatch(/\/workflows\/wf_1\/export$/);
+  });
+
   it('imports an assistant definition', async () => {
     const capture: Capture = {};
     await client(capture).imports.assistant({ name: 'Support', instructions: 'help' });

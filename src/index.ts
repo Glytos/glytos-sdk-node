@@ -331,6 +331,29 @@ class Workflows {
     return this.client.request('PATCH', `/workflows/${enc(workflowUuid)}`, { body: { name } });
   }
 
+  /**
+   * Export an agent as portable, secret-free JSON. It imports back through
+   * `imports.create('glytos', ...)`, on this account or another.
+   */
+  export(workflowUuid: string): Promise<Record<string, unknown>> {
+    return this.client.request('GET', `/workflows/${enc(workflowUuid)}/export`);
+  }
+
+  /** File an agent into a folder. Both must be in the same environment. */
+  moveToFolder(workflowUuid: string, folderUuid: string): Promise<Workflow> {
+    return this.client.request('PATCH', `/workflows/${enc(workflowUuid)}`, {
+      body: { folder_uuid: folderUuid },
+    });
+  }
+
+  /** Take an agent out of its folder, leaving it ungrouped. */
+  removeFromFolder(workflowUuid: string): Promise<Workflow> {
+    // Sent as null is what unfiles it; not sent at all would leave it where it is.
+    return this.client.request('PATCH', `/workflows/${enc(workflowUuid)}`, {
+      body: { folder_uuid: null },
+    });
+  }
+
   /** Duplicate an agent, returning the new copy. */
   duplicate(workflowUuid: string): Promise<Workflow> {
     return this.client.request('POST', `/workflows/${enc(workflowUuid)}/duplicate`);

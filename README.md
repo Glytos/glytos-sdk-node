@@ -51,8 +51,7 @@ A long answer should not arrive as one silent wait:
 ```ts
 for await (const event of glytos.threads.runs.stream(thread, 'Summarise the policy')) {
   if (event.type === 'token') process.stdout.write(event.delta);
-  if (event.type === 'done') console.log('
-', event.run.status);
+  if (event.type === 'done') console.log('\n' + event.run.status);
 }
 ```
 
@@ -78,7 +77,7 @@ const glytos = new Glytos({ apiKey: '...', baseUrl: 'https://api.glytos.com/api/
 
 | Namespace | Methods |
 | --- | --- |
-| `glytos.agents` (alias `workflows`) | `list`, `retrieve`, `create`, `update`, `publish`, `promote`, `duplicate`, `archive`, `delete`, `templates`, `export`, `versions`, `startSession`, `sendMessage`, `streamMessage`, `runText` |
+| `glytos.agents` (alias `workflows`) | `list`, `retrieve`, `create`, `rename`, `publish`, `promote`, `duplicate`, `archive`, `delete`, `templates`, `export`, `moveToFolder`, `removeFromFolder`, `versions`, `startSession`, `sendMessage`, `streamMessage`, `runText` |
 | `glytos.threads` | `create`, `retrieve`, `messages.create`, `messages.list`, `runs.create`, `runs.stream` |
 | `glytos.folders` | `list`, `create`, `rename`, `delete` |
 | `glytos.imports` | `sources`, `create`, `assistant` |
@@ -91,7 +90,7 @@ const glytos = new Glytos({ apiKey: '...', baseUrl: 'https://api.glytos.com/api/
 | `glytos.campaigns` | `list`, `create`, `retrieve`, `start`, `syncContacts` |
 | `glytos.sessions` | `list` |
 | `glytos.analytics` | `overview` |
-| `glytos.webhooks` | `list`, `create`, `delete`, `events`, `verify` |
+| `glytos.webhooks` | `list`, `create`, `update`, `delete`, `events`, `deliveries`, `redeliver`, `verify` |
 
 `agents` and `workflows` are the same resource under two names: the product calls
 them agents, the API path is `/workflows`. Either works.

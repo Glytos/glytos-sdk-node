@@ -18,8 +18,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - File uploads: `chat.uploadFile`, `knowledgeBase.uploadDocument`,
   `vectorStores.uploadDocument`, plus `client.requestForm` for any other multipart
   endpoint.
-- `folders` - group agents inside an environment.
-- `imports` - bring an agent over from another platform.
+- `folders` - group agents inside an environment, and `agents.moveToFolder` /
+  `agents.removeFromFolder` to file one.
+- `imports` - bring an agent over from another platform, and `agents.export` for the
+  portable, secret-free JSON that imports back.
 - `agents` as an alias of `workflows`, matching what the product calls them.
 
 ### Changed
