@@ -152,6 +152,88 @@ export interface ChatToken {
   [key: string]: unknown;
 }
 
+export interface AgentFolder {
+  uuid: string;
+  name: string;
+  [key: string]: unknown;
+}
+
+export interface ChatFile {
+  file_uuid: string;
+  filename: string;
+  characters: number;
+  [key: string]: unknown;
+}
+
+/** One entry of a conversation. */
+export interface Message {
+  role: string;
+  content: string;
+  ts?: string | null;
+  node_id?: string | null;
+  images?: string[] | null;
+  [key: string]: unknown;
+}
+
+/**
+ * A conversation with an agent. Created against one agent and carrying its id, so
+ * every later call knows which agent to run without a second lookup.
+ */
+export interface Thread {
+  /** The conversation id. */
+  id: string;
+  /** The agent this conversation belongs to. */
+  agent: string;
+  status: string;
+  /** Anything the agent opened with (a greeting), empty for a silent opening. */
+  messages: Message[];
+  [key: string]: unknown;
+}
+
+/** A thread plus everything recorded about it: full transcript, variables, cost. */
+export interface ThreadDetail {
+  id: string;
+  agent: string;
+  status: string;
+  messages: Message[];
+  variables: Record<string, unknown>;
+  cost?: unknown;
+  created_at?: string;
+  [key: string]: unknown;
+}
+
+/** The result of one turn: what the agent said back, and where the flow now sits. */
+export interface Run {
+  status: string;
+  /** Only THIS turn's reply - the thread holds the whole conversation. */
+  messages: Message[];
+  current_node_id?: string | null;
+  [key: string]: unknown;
+}
+
+/** A single Server-Sent Event from a streamed turn. */
+export type StreamEvent =
+  /** One piece of the reply as it is written. */
+  | { type: 'token'; delta: string }
+  /** The turn finished; carries the same payload a non-streamed turn returns. */
+  | { type: 'done'; run: Run }
+  /** The turn failed. */
+  | { type: 'error'; message: string };
+
+/** Accepts the object `threads.create` returned, or the two ids spelled out. */
+export type ThreadRef = Thread | ThreadDetail | { id: string; agent: string };
+
+export interface TurnInput {
+  content?: string;
+  /** Image references (data: URIs or URLs) for this turn only. */
+  images?: string[];
+  /**
+   * Extra context for THIS turn only, applied below the agent's own instructions
+   * and never saved to the agent.
+   */
+  instructions?: string;
+}
+
 const enc = encodeURIComponent;
 
 /**
@@ -163,6 +245,32 @@ function toList<T>(resp: unknown): T[] {
   if (Array.isArray(resp)) return resp as T[];
   const wrapped = (resp as { items?: unknown } | null | undefined)?.items;
   return Array.isArray(wrapped) ? (wrapped as T[]) : [];
+}
+
+/** The ids behind a thread reference, whichever form the caller passed. */
+function threadIds(thread: ThreadRef): { agent: string; id: string } {
+  const agent = String(thread.agent ?? '');
+  const id = String(thread.id ?? '');
+  if (!agent || !id) {
+    throw new Error('Glytos: a thread reference needs both `id` and `agent`');
+  }
+  return { agent, id };
+}
+
+/** Whatever the caller handed us as a file, as something FormData accepts. */
+function toBlob(file: Blob | ArrayBuffer | Uint8Array | string): Blob {
+  if (typeof file === 'string') return new Blob([file]);
+  if (file instanceof Blob) return file;
+  return new Blob([file as BlobPart]);
+}
+
+/** The turn body shared by the plain and the streamed endpoint. */
+function turnBody(input: TurnInput | string): Record<string, unknown> {
+  const turn: TurnInput = typeof input === 'string' ? { content: input } : input;
+  const body: Record<string, unknown> = { content: turn.content ?? '' };
+  if (turn.images !== undefined) body.images = turn.images;
+  if (turn.instructions !== undefined) body.additional_instructions = turn.instructions;
+  return body;
 }
 
 class Workflows {
@@ -278,15 +386,28 @@ class Workflows {
   sendMessage(
     workflowUuid: string,
     sessionUuid: string,
-    content: string,
+    input: TurnInput | string,
     images?: string[],
-  ): Promise<unknown> {
-    const body: Record<string, unknown> = { content };
-    if (images !== undefined) body.images = images;
+  ): Promise<Run> {
+    const turn: TurnInput = typeof input === 'string' ? { content: input } : input;
+    if (images !== undefined && turn.images === undefined) turn.images = images;
     return this.client.request(
       'POST',
       `/workflows/${enc(workflowUuid)}/sessions/${enc(sessionUuid)}/messages`,
-      { body },
+      { body: turnBody(turn) },
+    );
+  }
+
+  /** The same turn, delivered as it is written. */
+  streamMessage(
+    workflowUuid: string,
+    sessionUuid: string,
+    input: TurnInput | string,
+  ): AsyncGenerator<StreamEvent, void, undefined> {
+    return this.client.stream(
+      'POST',
+      `/workflows/${enc(workflowUuid)}/sessions/${enc(sessionUuid)}/messages/stream`,
+      { body: turnBody(input) },
     );
   }
 
@@ -518,6 +639,195 @@ class Chat {
   }): Promise<unknown> {
     return this.client.request('POST', '/chat/messages', { body });
   }
+
+  /** The same turn, delivered as it is written. */
+  stream(body: {
+    token: string;
+    content: string;
+    session_uuid?: string;
+    images?: string[];
+  }): AsyncGenerator<StreamEvent, void, undefined> {
+    return this.client.stream('POST', '/chat/stream', { body });
+  }
+
+  /**
+   * Attach a file to one conversation. Its text is put in front of the agent for
+   * that conversation only - it does not join the knowledge base.
+   */
+  uploadFile(body: {
+    token: string;
+    sessionUuid: string;
+    file: Blob | ArrayBuffer | Uint8Array | string;
+    filename?: string;
+  }): Promise<ChatFile> {
+    const form = new FormData();
+    form.set('token', body.token);
+    form.set('session_uuid', body.sessionUuid);
+    form.set('file', toBlob(body.file), body.filename ?? 'file');
+    return this.client.requestForm('POST', '/chat/files', form);
+  }
+}
+
+/**
+ * Conversations with a text agent, in the vocabulary the rest of the industry uses:
+ * a thread holds the conversation, a run is one turn on it.
+ *
+ * This is the same session API `glytos.agents` exposes, shaped so code written
+ * against a thread/run model reads the same here. A thread is created against one
+ * agent and carries its id, so no later call has to repeat it.
+ */
+class Threads {
+  readonly messages: ThreadMessages;
+  readonly runs: ThreadRuns;
+
+  constructor(private readonly client: Glytos) {
+    this.messages = new ThreadMessages(client);
+    this.runs = new ThreadRuns(client);
+  }
+
+  /** Open a conversation with an agent. */
+  async create(body: {
+    agent: string;
+    variables?: Record<string, unknown>;
+    /** Run a specific agent version instead of the current one. */
+    version?: number | string;
+  }): Promise<Thread> {
+    const { agent, ...rest } = body;
+    const started = await this.client.request<{
+      session_uuid: string;
+      status: string;
+      messages?: Message[];
+    }>('POST', `/workflows/${enc(agent)}/sessions`, { body: rest });
+    return {
+      id: started.session_uuid,
+      agent,
+      status: started.status,
+      messages: started.messages ?? [],
+    };
+  }
+
+  /** The conversation so far, with its variables and cost. */
+  async retrieve(thread: ThreadRef): Promise<ThreadDetail> {
+    const { agent, id } = threadIds(thread);
+    const detail = await this.client.request<{
+      session_uuid: string;
+      status: string;
+      transcript?: Message[];
+      variables?: Record<string, unknown>;
+      [key: string]: unknown;
+    }>('GET', `/workflows/${enc(agent)}/sessions/${enc(id)}`);
+    const { session_uuid, transcript, variables, ...rest } = detail;
+    return {
+      ...rest,
+      id: session_uuid,
+      agent,
+      status: detail.status,
+      messages: transcript ?? [],
+      variables: variables ?? {},
+    };
+  }
+}
+
+class ThreadMessages {
+  constructor(private readonly client: Glytos) {}
+
+  /**
+   * Add a user message and run the agent on it. Returns that turn's reply.
+   *
+   * Async so a malformed thread reference rejects like every other failure here,
+   * rather than throwing synchronously past a caller's `.catch()`.
+   */
+  async create(thread: ThreadRef, input: TurnInput | string): Promise<Run> {
+    const { agent, id } = threadIds(thread);
+    return this.client.request('POST', `/workflows/${enc(agent)}/sessions/${enc(id)}/messages`, {
+      body: turnBody(input),
+    });
+  }
+
+  /** Every message in the conversation, oldest first. */
+  async list(thread: ThreadRef): Promise<Message[]> {
+    const { agent, id } = threadIds(thread);
+    const detail = await this.client.request<{ transcript?: Message[] }>(
+      'GET',
+      `/workflows/${enc(agent)}/sessions/${enc(id)}`,
+    );
+    return detail.transcript ?? [];
+  }
+}
+
+class ThreadRuns {
+  constructor(private readonly client: Glytos) {}
+
+  /**
+   * Run one turn and wait for it. A turn completes before it returns, so there is
+   * no run to poll: the reply is already in the result.
+   */
+  async create(thread: ThreadRef, input: TurnInput | string = {}): Promise<Run> {
+    const { agent, id } = threadIds(thread);
+    return this.client.request('POST', `/workflows/${enc(agent)}/sessions/${enc(id)}/messages`, {
+      body: turnBody(input),
+    });
+  }
+
+  /**
+   * The same turn, delivered as it is written. A bad thread reference surfaces on
+   * the first iteration rather than at call time, which is how a generator is
+   * expected to report a problem.
+   */
+  async *stream(
+    thread: ThreadRef,
+    input: TurnInput | string = {},
+  ): AsyncGenerator<StreamEvent, void, undefined> {
+    const { agent, id } = threadIds(thread);
+    yield* this.client.stream(
+      'POST',
+      `/workflows/${enc(agent)}/sessions/${enc(id)}/messages/stream`,
+      { body: turnBody(input) },
+    );
+  }
+}
+
+class Folders {
+  constructor(private readonly client: Glytos) {}
+
+  /** Folders in the active environment. */
+  list(): Promise<AgentFolder[]> {
+    return this.client.request('GET', '/agent-folders');
+  }
+
+  /** Create a folder in the active environment. */
+  create(name: string): Promise<AgentFolder> {
+    return this.client.request('POST', '/agent-folders', { body: { name } });
+  }
+
+  /** Rename a folder. */
+  rename(folderUuid: string, name: string): Promise<AgentFolder> {
+    return this.client.request('PATCH', `/agent-folders/${enc(folderUuid)}`, { body: { name } });
+  }
+
+  /** Delete a folder. The agents filed in it are deleted with it. */
+  delete(folderUuid: string): Promise<void> {
+    return this.client.request('DELETE', `/agent-folders/${enc(folderUuid)}`);
+  }
+}
+
+class Imports {
+  constructor(private readonly client: Glytos) {}
+
+  /** The platforms an agent can be brought over from. */
+  sources(): Promise<unknown[]> {
+    return this.client.request('GET', '/imports/sources');
+  }
+
+  /** Bring an agent over from another platform's export. */
+  create(source: string, payload: Record<string, unknown>): Promise<unknown> {
+    return this.client.request('POST', `/imports/${enc(source)}`, { body: { payload } });
+  }
+
+  /** Bring over an assistant definition, tools and all. */
+  assistant(assistant: Record<string, unknown>): Promise<unknown> {
+    return this.client.request('POST', '/imports/openai-assistant', { body: { assistant } });
+  }
 }
 
 class Tools {
@@ -577,6 +887,16 @@ class KnowledgeBase {
     return this.client.request('POST', '/knowledge-base/documents', { body });
   }
 
+  /** Upload a document file (txt, md, pdf) instead of pasting its text. */
+  uploadDocument(
+    file: Blob | ArrayBuffer | Uint8Array | string,
+    filename = 'document',
+  ): Promise<KnowledgeDocument> {
+    const form = new FormData();
+    form.set('file', toBlob(file), filename);
+    return this.client.requestForm('POST', '/knowledge-base/documents/upload', form);
+  }
+
   /** Hybrid (vector + full-text) search over your documents. */
   search(body: {
     query: string;
@@ -610,6 +930,21 @@ class VectorStores {
   delete(vectorStoreUuid: string): Promise<void> {
     return this.client.request('DELETE', `/vector-stores/${enc(vectorStoreUuid)}`);
   }
+
+  /** Add a document file to a vector store, so an agent can search it. */
+  uploadDocument(
+    vectorStoreUuid: string,
+    file: Blob | ArrayBuffer | Uint8Array | string,
+    filename = 'document',
+  ): Promise<KnowledgeDocument> {
+    const form = new FormData();
+    form.set('file', toBlob(file), filename);
+    return this.client.requestForm(
+      'POST',
+      `/vector-stores/${enc(vectorStoreUuid)}/documents/upload`,
+      form,
+    );
+  }
 }
 
 class Analytics {
@@ -625,6 +960,17 @@ class Analytics {
 
 export class Glytos {
   readonly workflows: Workflows;
+  /**
+   * The same resource as `workflows`, under the word the product and the docs use.
+   * Both names stay so existing code keeps working.
+   */
+  readonly agents: Workflows;
+  /** Conversations with a text agent, in thread/run vocabulary. */
+  readonly threads: Threads;
+  /** Folders that group agents inside an environment. */
+  readonly folders: Folders;
+  /** Bring an agent over from another platform. */
+  readonly imports: Imports;
   readonly calls: Calls;
   readonly phoneNumbers: PhoneNumbers;
   readonly sessions: Sessions;
@@ -654,6 +1000,10 @@ export class Glytos {
     this.fetchImpl = fetchImpl;
 
     this.workflows = new Workflows(this);
+    this.agents = this.workflows;
+    this.threads = new Threads(this);
+    this.folders = new Folders(this);
+    this.imports = new Imports(this);
     this.calls = new Calls(this);
     this.phoneNumbers = new PhoneNumbers(this);
     this.sessions = new Sessions(this);
@@ -709,6 +1059,113 @@ export class Glytos {
     }
     return data as T;
   }
+
+  /**
+   * Upload a file. Separate from `request` because the body is multipart, so the
+   * Content-Type has to carry the boundary fetch generates - setting it by hand
+   * produces a body the server cannot parse.
+   */
+  async requestForm<T = unknown>(method: string, path: string, form: FormData): Promise<T> {
+    const headers: Record<string, string> = {
+      'X-API-Key': this.apiKey,
+      Accept: 'application/json',
+    };
+    if (this.environment) headers['X-Environment-Id'] = this.environment;
+
+    const response = await this.fetchImpl(this.baseUrl + path, { method, headers, body: form });
+    const requestId = response.headers.get('x-request-id') ?? undefined;
+    const text = await response.text();
+    const data = text ? safeParse(text) : undefined;
+    if (!response.ok) {
+      const error = (data as { error?: { code?: string; message?: string } } | undefined)?.error;
+      throw new GlytosError(
+        response.status,
+        error?.code ?? 'error',
+        error?.message ?? (response.statusText || 'Request failed'),
+        requestId,
+      );
+    }
+    return data as T;
+  }
+
+  /**
+   * Stream a Server-Sent Events endpoint, yielding one parsed event at a time.
+   *
+   * The reply arrives as it is written rather than after the last token, which is
+   * the whole difference on a long answer. The terminal `done` event carries the
+   * same payload the non-streamed call returns, so a caller can render the deltas
+   * and still end up with the authoritative result.
+   */
+  async *stream(
+    method: string,
+    path: string,
+    options: RequestOptions = {},
+  ): AsyncGenerator<StreamEvent, void, undefined> {
+    const url = new URL(this.baseUrl + path);
+    if (options.query) {
+      for (const [key, value] of Object.entries(options.query)) {
+        if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
+      }
+    }
+    const headers: Record<string, string> = {
+      'X-API-Key': this.apiKey,
+      Accept: 'text/event-stream',
+    };
+    if (this.environment) headers['X-Environment-Id'] = this.environment;
+    const init: RequestInit = { method, headers };
+    if (options.body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(options.body);
+    }
+
+    const response = await this.fetchImpl(url.toString(), init);
+    if (!response.ok) {
+      const text = await response.text();
+      const error = (safeParse(text) as { error?: { code?: string; message?: string } } | undefined)
+        ?.error;
+      throw new GlytosError(
+        response.status,
+        error?.code ?? 'error',
+        error?.message ?? (response.statusText || 'Request failed'),
+        response.headers.get('x-request-id') ?? undefined,
+      );
+    }
+    if (!response.body) return;
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    // @ts-expect-error - Node's ReadableStream is async-iterable at runtime; the DOM
+    // lib's type for it is not, and iterating is the portable way to read it.
+    for await (const chunk of response.body) {
+      buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+      // Events are separated by a blank line; keep the trailing partial in the buffer.
+      let split = buffer.indexOf('\n\n');
+      while (split !== -1) {
+        const event = parseSse(buffer.slice(0, split));
+        if (event) yield event;
+        buffer = buffer.slice(split + 2);
+        split = buffer.indexOf('\n\n');
+      }
+    }
+    const last = parseSse(buffer);
+    if (last) yield last;
+  }
+}
+
+/** Turn one raw SSE block ("event: x\ndata: {...}") into a typed event. */
+function parseSse(block: string): StreamEvent | null {
+  let name = '';
+  const dataLines: string[] = [];
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event:')) name = line.slice(6).trim();
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+  }
+  if (!name || dataLines.length === 0) return null;
+  const data = safeParse(dataLines.join('\n')) as Record<string, unknown>;
+  if (name === 'token') return { type: 'token', delta: String(data?.delta ?? '') };
+  if (name === 'error') return { type: 'error', message: String(data?.message ?? 'stream failed') };
+  if (name === 'done') return { type: 'done', run: data as unknown as Run };
+  return null;
 }
 
 function safeParse(text: string): unknown {
