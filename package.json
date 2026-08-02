@@ -1,13 +1,17 @@
 {
   "name": "@glytos/node",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Official Glytos server SDK for Node.js and TypeScript.",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "sideEffects": false,
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "engines": {
     "node": ">=18"
   },
@@ -17,7 +21,14 @@
     "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["glytos", "voice", "ai", "agent", "sdk", "api"],
+  "keywords": [
+    "glytos",
+    "voice",
+    "ai",
+    "agent",
+    "sdk",
+    "api"
+  ],
   "author": "Glytos",
   "license": "MIT",
   "homepage": "https://glytos.com",
