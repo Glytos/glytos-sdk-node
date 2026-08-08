@@ -4,6 +4,29 @@ All notable changes to this project are documented in this file. The format is b
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `dnc` - the numbers your organization must not call: `dnc.list`, `dnc.add`,
+  `dnc.import`, `dnc.setScope`, `dnc.remove`. Every outbound call is checked
+  against this list, whether it comes from a campaign or from `calls.create`.
+- `campaigns.stop`, `campaigns.delete` and `campaigns.addContacts` (upload a
+  contact list as CSV text rather than serving it over HTTP).
+- `campaigns.previewSuppression` - how many of a contact list each suppression
+  policy would reach, including how many of those people asked on a call not to
+  be contacted again.
+- `campaigns.create` gained `contacts_csv`, `scheduled_at`, `call_window_start`
+  /`call_window_end`, `timezone`, `suppression_policy` and
+  `override_caller_requests`.
+- `CampaignDetail`, `CampaignContact`, `SuppressionPreview`, `ContactSyncResult`,
+  `DncEntry` and their status/scope unions are exported.
+
+### Fixed
+
+- `campaigns.create` typed `contacts` as an array of objects, which the API
+  rejects with a 422. It is an array of phone numbers.
+
 ## [0.2.0] - 2026-08-02
 
 ### Added

@@ -117,10 +117,135 @@ export interface WorkflowVersion {
   [key: string]: unknown;
 }
 
+export type CampaignStatus =
+  | 'draft'
+  | 'scheduled'
+  | 'running'
+  | 'waiting'
+  | 'stopped'
+  | 'completed'
+  | 'halted'
+  | 'out_of_credit'
+  | 'failed';
+
+/**
+ * How much of the do-not-call list a campaign honours: `strict` all of it,
+ * `transactional` still calls people who only refused marketing, `ignore` skips
+ * entries the organization added for itself (requests people made on a call
+ * still apply).
+ */
+export type SuppressionPolicy = 'strict' | 'transactional' | 'ignore';
+
 export interface Campaign {
   uuid: string;
   name: string;
-  status?: string;
+  workflow_uuid?: string;
+  from_number?: string;
+  status?: CampaignStatus;
+  /** Why a campaign stopped short of the end of its list. */
+  status_detail?: string;
+  scheduled_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  /** Dialing hours, read in `timezone`. */
+  call_window_start?: string | null;
+  call_window_end?: string | null;
+  timezone?: string | null;
+  suppression_policy?: SuppressionPolicy;
+  override_caller_requests?: boolean;
+  [key: string]: unknown;
+}
+
+export type ContactStatus =
+  | 'pending'
+  | 'dialing'
+  | 'answered'
+  | 'voicemail'
+  | 'no_answer'
+  | 'failed'
+  | 'suppressed';
+
+export interface CampaignContact {
+  phone: string;
+  /**
+   * Busy is not reported separately from `no_answer`: it needs per-carrier
+   * callbacks the platform does not collect.
+   */
+  status: ContactStatus;
+  /** The carrier's own id for the call. */
+  call_sid?: string | null;
+  /** The carrier's own words when it refused the number. */
+  error?: string | null;
+  /** The conversation this contact produced, if it answered. */
+  session_uuid?: string | null;
+  /**
+   * The contact's other CSV columns, which reach the agent's prompt, so
+   * `{{name}}` means this person.
+   */
+  variables?: Record<string, string>;
+  [key: string]: unknown;
+}
+
+export interface CampaignDetail extends Campaign {
+  contacts: CampaignContact[];
+}
+
+/** How many of a contact list each suppression policy would reach. */
+export interface SuppressionPreview {
+  contacts: number;
+  suppressed_total: number;
+  /** How many of them asked, on a call, not to be contacted again. */
+  caller_requested: number;
+  reached_if_strict: number;
+  reached_if_transactional: number;
+  reached_if_ignore: number;
+  reached_if_override: number;
+  [key: string]: unknown;
+}
+
+/** What adding contacts to a campaign did. */
+export interface ContactSyncResult {
+  added: number;
+  /** Already on the list. */
+  skipped: number;
+  /** Held no usable phone number. */
+  rejected: number;
+  /**
+   * The column read as the phone number, so a file read from the wrong one is
+   * distinguishable from one that could not be read at all.
+   */
+  phone_column: string;
+  [key: string]: unknown;
+}
+
+/** How far a suppression reaches. */
+export type DncScope = 'all' | 'marketing';
+
+/** How a number reached the do-not-call list. */
+export type DncSource = 'agent' | 'manual' | 'import' | 'api';
+
+export interface DncEntry {
+  uuid: string;
+  phone: string;
+  source: DncSource;
+  scope: DncScope;
+  reason?: string | null;
+  last_matched_at?: string | null;
+  created_at?: string;
+  [key: string]: unknown;
+}
+
+export interface DncList {
+  items: DncEntry[];
+  total: number;
+}
+
+export interface DncImportResult {
+  added: number;
+  /** Already on the list. */
+  duplicates: number;
+  /** Not phone numbers. */
+  rejected: number;
   [key: string]: unknown;
 }
 
@@ -621,27 +746,143 @@ class Campaigns {
   create(body: {
     name: string;
     workflow_uuid: string;
+    /**
+     * The caller id to dial from. It must be a number your organization has
+     * connected, or the campaign is refused.
+     */
     from_number: string;
-    contacts?: Array<Record<string, unknown>>;
+    /**
+     * An initial contact list. Any spelling works: numbers are converted to
+     * international form and duplicates are dropped.
+     */
+    contacts?: string[];
+    /**
+     * The contents of a CSV file. The phone column is found by its header or by
+     * which column holds phone numbers, and every other column travels with
+     * that contact's call as a variable.
+     */
+    contacts_csv?: string;
+    /**
+     * Start the campaign at a moment in the future (ISO 8601). Left unset, the
+     * campaign is a draft until you call `start`.
+     */
+    scheduled_at?: string;
+    /** Dialing hours ("09:00", "20:00"), read in `timezone`. Set both or neither. */
+    call_window_start?: string;
+    call_window_end?: string;
+    /** An IANA name, e.g. "Europe/Istanbul". Defaults to UTC. */
+    timezone?: string;
+    suppression_policy?: SuppressionPolicy;
+    /**
+     * Also call people who asked, on a call, not to be contacted again. Only
+     * valid with a `suppression_policy` of `ignore`.
+     */
+    override_caller_requests?: boolean;
   }): Promise<Campaign> {
     return this.client.request('POST', '/telephony/campaigns', { body });
   }
 
-  /** Retrieve a campaign by uuid. */
-  retrieve(campaignUuid: string): Promise<Campaign> {
+  /** Retrieve a campaign by uuid, with its contacts and their outcomes. */
+  retrieve(campaignUuid: string): Promise<CampaignDetail> {
     return this.client.request('GET', `/telephony/campaigns/${enc(campaignUuid)}`);
   }
 
-  /** Start a campaign (begins dialing its contacts). */
+  /**
+   * Begin dialing, from the contacts that have not been called yet. A campaign
+   * that is already running is refused.
+   */
   start(campaignUuid: string): Promise<Campaign> {
     return this.client.request('POST', `/telephony/campaigns/${enc(campaignUuid)}/start`);
   }
 
-  /** Load a campaign's contacts from a remote source URL. */
-  syncContacts(campaignUuid: string, sourceUrl: string): Promise<unknown> {
+  /**
+   * End dialing at the next contact. Calls already handed to the carrier run to
+   * their end; undialed contacts stay ready, so `start` resumes.
+   */
+  stop(campaignUuid: string): Promise<Campaign> {
+    return this.client.request('POST', `/telephony/campaigns/${enc(campaignUuid)}/stop`);
+  }
+
+  /** Remove a campaign and its contact list. A running campaign is stopped first. */
+  delete(campaignUuid: string): Promise<void> {
+    return this.client.request('DELETE', `/telephony/campaigns/${enc(campaignUuid)}`);
+  }
+
+  /** Append contacts from the contents of a CSV file. */
+  addContacts(campaignUuid: string, contactsCsv: string): Promise<ContactSyncResult> {
+    return this.client.request('POST', `/telephony/campaigns/${enc(campaignUuid)}/contacts/sync`, {
+      body: { contacts_csv: contactsCsv },
+    });
+  }
+
+  /** Append contacts from a CSV your own system serves over HTTP. */
+  syncContacts(campaignUuid: string, sourceUrl: string): Promise<ContactSyncResult> {
     return this.client.request('POST', `/telephony/campaigns/${enc(campaignUuid)}/contacts/sync`, {
       body: { source_url: sourceUrl },
     });
+  }
+
+  /**
+   * Report how many of a contact list each suppression policy would reach,
+   * including how many of those people asked on a call not to be contacted.
+   * Measure before choosing anything other than the default.
+   */
+  previewSuppression(body: {
+    contacts?: string[];
+    contacts_csv?: string;
+  }): Promise<SuppressionPreview> {
+    return this.client.request('POST', '/telephony/campaigns/suppression-preview', { body });
+  }
+}
+
+/**
+ * The numbers your organization must not call.
+ *
+ * Every outbound call is checked against this list, whether it comes from a
+ * campaign or from `calls.create`. Agents add to it themselves when a caller
+ * asks not to be contacted again.
+ */
+class Dnc {
+  constructor(private readonly client: Glytos) {}
+
+  /** List suppressed numbers, newest first. */
+  list(query?: {
+    /**
+     * Normalized before matching, so a number typed the way it appears on a
+     * contact list finds the entry stored in international form.
+     */
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<DncList> {
+    return this.client.request('GET', '/dnc', { query: query ?? {} });
+  }
+
+  /**
+   * Suppress a number. Any spelling is accepted and stored in international
+   * form. Adding one already on the list returns the existing entry rather than
+   * failing.
+   */
+  add(phone: string, reason?: string): Promise<DncEntry> {
+    return this.client.request('POST', '/dnc', { body: { phone, reason } });
+  }
+
+  /** Suppress many numbers at once, e.g. a list exported from your CRM. */
+  import(phones: string[], reason?: string): Promise<DncImportResult> {
+    return this.client.request('POST', '/dnc/import', { body: { phones, reason } });
+  }
+
+  /**
+   * Change how far a suppression reaches: `all` for every call, or `marketing`
+   * to allow a transactional call about the person's own order.
+   */
+  setScope(phone: string, scope: DncScope): Promise<DncEntry> {
+    return this.client.request('PATCH', `/dnc/${enc(phone)}`, { body: { scope } });
+  }
+
+  /** Take a number off the list, so it can be called again. */
+  remove(phone: string): Promise<void> {
+    return this.client.request('DELETE', `/dnc/${enc(phone)}`);
   }
 }
 
@@ -999,6 +1240,8 @@ export class Glytos {
   readonly sessions: Sessions;
   readonly webhooks: Webhooks;
   readonly campaigns: Campaigns;
+  /** The numbers your organization must not call. */
+  readonly dnc: Dnc;
   readonly chat: Chat;
   readonly tools: Tools;
   readonly knowledgeBase: KnowledgeBase;
@@ -1032,6 +1275,7 @@ export class Glytos {
     this.sessions = new Sessions(this);
     this.webhooks = new Webhooks(this);
     this.campaigns = new Campaigns(this);
+    this.dnc = new Dnc(this);
     this.chat = new Chat(this);
     this.tools = new Tools(this);
     this.knowledgeBase = new KnowledgeBase(this);

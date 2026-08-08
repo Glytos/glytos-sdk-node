@@ -87,7 +87,8 @@ const glytos = new Glytos({ apiKey: '...', baseUrl: 'https://api.glytos.com/api/
 | `glytos.knowledgeBase` | `listDocuments`, `createDocument`, `uploadDocument`, `search` |
 | `glytos.vectorStores` | `list`, `create`, `retrieve`, `delete`, `uploadDocument` |
 | `glytos.tools` | `list`, `create`, `retrieve`, `update`, `delete` |
-| `glytos.campaigns` | `list`, `create`, `retrieve`, `start`, `syncContacts` |
+| `glytos.campaigns` | `list`, `create`, `retrieve`, `start`, `stop`, `delete`, `addContacts`, `syncContacts`, `previewSuppression` |
+| `glytos.dnc` | `list`, `add`, `import`, `setScope`, `remove` |
 | `glytos.sessions` | `list` |
 | `glytos.analytics` | `overview` |
 | `glytos.webhooks` | `list`, `create`, `update`, `delete`, `events`, `deliveries`, `redeliver`, `verify` |
@@ -107,6 +108,56 @@ Any endpoint without a dedicated helper is one call away:
 
 ```ts
 const overview = await glytos.request('GET', '/analytics/overview');
+```
+
+## Outbound calling
+
+A campaign dials a list of contacts with one agent. Upload the list as CSV text:
+the phone column is found by its header or by which column holds phone numbers,
+and every other column travels with that contact, so `{{name}}` in the agent's
+prompt means the person being called.
+
+```ts
+import { readFileSync } from 'node:fs';
+
+const campaign = await glytos.campaigns.create({
+  name: 'March outreach',
+  workflow_uuid: agent.uuid,
+  from_number: '+15551230000', // must be a number you have connected
+  contacts_csv: readFileSync('leads.csv', 'utf8'),
+  scheduled_at: '2026-03-01T09:00:00Z',
+  call_window_start: '09:00',
+  call_window_end: '20:00',
+  timezone: 'Europe/Istanbul',
+});
+```
+
+Left unscheduled, a campaign stays a draft until `start`. `stop` ends it at the
+next contact, leaving the undialed ones ready to resume. `retrieve` returns each
+contact's outcome and, where one answered, the session it produced.
+
+Every outbound call is checked against your do-not-call list first, whether it
+comes from a campaign or from `calls.create`. Agents add to that list themselves
+when someone asks not to be contacted again:
+
+```ts
+await glytos.dnc.add('+15551230000', 'asked on a call');
+```
+
+A campaign chooses how much of the list applies. The default, `strict`, honours
+all of it. `transactional` still calls people who only refused marketing, which
+is what you want for a call about someone's own order. `ignore` skips entries
+your organization added for itself, but requests people made on a call still
+apply unless you also set `override_caller_requests`. Measure before you choose:
+
+```ts
+const preview = await glytos.campaigns.previewSuppression({
+  contacts_csv: readFileSync('leads.csv', 'utf8'),
+});
+console.log(
+  `${preview.reached_if_strict} of ${preview.contacts} reachable;`,
+  `${preview.caller_requested} asked us not to call`,
+);
 ```
 
 ## Errors
