@@ -222,6 +222,17 @@ describe('dnc parity', () => {
     });
   });
 
+  it('omits an unstated reason rather than sending null', async () => {
+    // The reason is a plain string server-side, not a nullable one, so a null
+    // is a 422 rather than "no reason given".
+    const capture: Capture = {};
+    await client(capture).dnc.add('+15550003333');
+    expect(await capture.request!.json()).toEqual({ phone: '+15550003333' });
+
+    await client(capture, '{"added":1}').dnc.import(['+15550003333']);
+    expect(await capture.request!.json()).toEqual({ phones: ['+15550003333'] });
+  });
+
   it('setScope and remove carry the phone number in the path', async () => {
     const capture: Capture = {};
     await client(capture).dnc.setScope('+15550003333', 'marketing');
