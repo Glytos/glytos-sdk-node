@@ -249,10 +249,214 @@ export interface DncImportResult {
   [key: string]: unknown;
 }
 
+/**
+ * What a tool actually does.
+ *
+ * `code` runs only in an operator-configured sandbox, and `client` is resolved by
+ * the browser during a web call, so both are inert unless that side is set up.
+ */
+export type ToolKind = 'static' | 'http' | 'mcp' | 'code' | 'integration' | 'client';
+
 export interface Tool {
   uuid: string;
   name: string;
+  kind: ToolKind;
+  [key: string]: unknown;
+}
+
+/** One tool an MCP server publishes, as discovered from the server itself. */
+export interface McpTool {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface SipTrunk {
+  uuid: string;
+  name: string;
+  preset: string;
+  sip_server: string;
+  sip_port: number;
+  transport: string;
+  username: string;
+  /** `registered`, `pending` or `failed`. Only a registered trunk takes calls. */
+  status?: string;
+  status_detail?: string | null;
+  last_registered_at?: string | null;
+  number_count?: number;
+  [key: string]: unknown;
+}
+
+/** A carrier the platform already knows the connection details for. */
+export interface SipPreset {
+  key: string;
+  name: string;
+  sip_server: string;
+  sip_port: number;
+  transport: string;
+  country: string;
+  /** Whether these settings have been confirmed against the live carrier. */
+  verified: boolean;
+  note: string;
+  [key: string]: unknown;
+}
+
+export interface SipTrunkTest {
+  ok: boolean;
+  detail: string;
+  /**
+   * Whether the carrier answered at all. A carrier that refused the credentials
+   * is a different problem from one that never replied, and only the first is
+   * worth changing the password over.
+   */
+  reachable?: boolean;
+}
+
+export interface TestSuite {
+  uuid: string;
+  workflow_uuid: string;
+  name: string;
+  cases: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface TestSuiteRun {
+  suite_uuid: string;
+  passed: boolean;
+  total: number;
+  passed_count: number;
+  results: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+/** A third-party destination the platform can act on. */
+export interface Integration {
+  key: string;
+  name: string;
+  required_credentials: string[];
+  /** Which of those are safe to show back, so a form can be pre-filled. */
+  public_credentials?: string[];
+  /** Whether an automation may fire this integration. */
+  supports_automation?: boolean;
+  actions: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+/**
+ * One configured destination. An organization can hold several per integration -
+ * two Slack workspaces, three calendars - so an agent or automation names the
+ * connection rather than the integration.
+ */
+export interface IntegrationConnection {
+  uuid: string;
+  integration_key: string;
+  name: string;
+  is_active: boolean;
+  /** Credentials come back masked; secrets are never returned. */
+  data: Record<string, unknown>;
+  automation_count?: number;
+  [key: string]: unknown;
+}
+
+export interface Automation {
+  uuid: string;
+  name: string;
+  is_active: boolean;
+  /** A webhook event type, e.g. `session.completed`. */
+  trigger_event: string;
+  connection_uuid: string;
+  integration_key: string;
+  action: string;
+  payload_template: Record<string, unknown>;
+  conditions: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface AutomationRun {
+  event_type: string;
+  status: string;
+  error?: string | null;
+  duration_ms: number;
+  created_at: string;
+  [key: string]: unknown;
+}
+
+export interface CreditBalance {
+  balance: number;
+  currency: string;
+}
+
+export interface CreditTransaction {
+  amount: number;
   kind: string;
+  description: string;
+  balance_after: number;
+  created_at: string;
+  [key: string]: unknown;
+}
+
+export interface UsageSummary {
+  total_units: number;
+  total_cost: number;
+  record_count: number;
+  currency: string;
+}
+
+export interface Environment {
+  uuid: string;
+  /** The stable id to pass as `environment`: `dev`, `staging` or `prod`. */
+  kind: string;
+  name: string;
+  is_default: boolean;
+  [key: string]: unknown;
+}
+
+export interface Provider {
+  key: string;
+  name: string;
+  /** `llm`, `stt`, `tts` or `realtime`. */
+  service_type: string;
+  default_model: string;
+  models: Array<Record<string, unknown>>;
+  voices: Array<Record<string, unknown>>;
+  languages: Array<Record<string, unknown>>;
+  /** A provider that is not available renders as "Soon" and cannot be selected. */
+  available: boolean;
+  [key: string]: unknown;
+}
+
+export interface ApiKey {
+  id: number;
+  name: string;
+  key_prefix: string;
+  is_active: boolean;
+  last_used_at?: string | null;
+  created_at?: string;
+  expires_at?: string | null;
+  scopes?: string[] | null;
+  [key: string]: unknown;
+}
+
+/** A created key, the one and only time the secret is returned. */
+export interface CreatedApiKey extends ApiKey {
+  key: string;
+}
+
+export interface Organization {
+  id: number;
+  name: string;
+  slug: string;
+  /** Immutable: where this organization's data lives. */
+  region: string;
+  [key: string]: unknown;
+}
+
+export interface Region {
+  code: string;
+  label: string;
+  /** Empty for the stack you are already talking to. */
+  api_base_url: string;
   [key: string]: unknown;
 }
 
@@ -411,10 +615,17 @@ class Workflows {
     return this.client.request('GET', `/workflows/${enc(workflowUuid)}`);
   }
 
-  /** Create an agent. `mode` is `"prompt"` (default) or `"workflow"`. */
+  /**
+   * Create an agent. `mode` is `"prompt"` (default) or `"workflow"`, and
+   * `primary_channel` is `"voice"` (default) or `"chat"`.
+   *
+   * A new agent always lands in Development, whatever environment the client is
+   * scoped to, so nothing is ever built straight into production.
+   */
   create(body: {
     name: string;
     mode?: 'prompt' | 'workflow';
+    primary_channel?: 'voice' | 'chat';
     config?: Record<string, unknown>;
   }): Promise<Workflow> {
     return this.client.request('POST', '/workflows', { body });
@@ -599,9 +810,371 @@ class Calls {
     return this.client.request('POST', '/calls/web-token', { body });
   }
 
-  /** Control an in-progress call (e.g. transfer, hang up). */
-  control(callUuid: string, body: Record<string, unknown>): Promise<unknown> {
+  /**
+   * Act on a call that is happening right now: make the agent say a line, hand
+   * the call to a person, or end it.
+   *
+   * `say` needs `text`, `transfer` needs `to_number`, `end` needs neither.
+   */
+  control(
+    callUuid: string,
+    body:
+      | { action: 'say'; text: string }
+      | { action: 'transfer'; to_number: string }
+      | { action: 'end' },
+  ): Promise<unknown> {
     return this.client.request('POST', `/calls/${enc(callUuid)}/control`, { body });
+  }
+}
+
+/**
+ * BYO SIP trunks: connect a carrier directly, with no third party in between.
+ *
+ * A trunk registers with the carrier using credentials it issued you. Numbers are
+ * attached to a registered trunk through `phoneNumbers.importNumber`.
+ */
+class SipTrunks {
+  constructor(private readonly client: Glytos) {}
+
+  /** Carriers whose connection settings are already known, so you supply only the login. */
+  presets(): Promise<SipPreset[]> {
+    return this.client.request('GET', '/telephony/sip-trunks/presets');
+  }
+
+  /** List your trunks and their registration state. */
+  list(): Promise<SipTrunk[]> {
+    return this.client.request('GET', '/telephony/sip-trunks');
+  }
+
+  /**
+   * Register a trunk. Give a `preset` and the platform fills in the server, port
+   * and transport; otherwise set them yourself. The password is stored encrypted
+   * and is never returned.
+   */
+  create(body: {
+    username: string;
+    password: string;
+    name?: string;
+    preset?: string;
+    sip_server?: string;
+    sip_port?: number;
+    transport?: string;
+    from_domain?: string | null;
+    outbound_proxy?: string | null;
+    caller_id?: string | null;
+    carrier_networks?: string[];
+    use_registration?: boolean;
+    expires_seconds?: number;
+  }): Promise<SipTrunk> {
+    return this.client.request('POST', '/telephony/sip-trunks', { body });
+  }
+
+  /** Update a trunk (only the fields you pass are changed). */
+  update(trunkUuid: string, body: Record<string, unknown>): Promise<SipTrunk> {
+    return this.client.request('PATCH', `/telephony/sip-trunks/${enc(trunkUuid)}`, { body });
+  }
+
+  /** Remove a trunk. Numbers attached to it stop receiving calls. */
+  delete(trunkUuid: string): Promise<void> {
+    return this.client.request('DELETE', `/telephony/sip-trunks/${enc(trunkUuid)}`);
+  }
+
+  /** Re-check the trunk against its carrier now, rather than waiting for the next reconcile. */
+  test(trunkUuid: string): Promise<SipTrunkTest> {
+    return this.client.request('POST', `/telephony/sip-trunks/${enc(trunkUuid)}/test`);
+  }
+}
+
+/** Saved conversations replayed against an agent, to catch prompt regressions. */
+class TestSuites {
+  constructor(private readonly client: Glytos) {}
+
+  /** List your test suites. */
+  list(): Promise<TestSuite[]> {
+    return this.client.request('GET', '/test-suites');
+  }
+
+  /** Create a suite of cases against one agent. */
+  create(body: {
+    workflow_uuid: string;
+    name: string;
+    cases?: Array<Record<string, unknown>>;
+  }): Promise<TestSuite> {
+    return this.client.request('POST', '/test-suites', { body });
+  }
+
+  /** Delete a suite. */
+  delete(suiteUuid: string): Promise<void> {
+    return this.client.request('DELETE', `/test-suites/${enc(suiteUuid)}`);
+  }
+
+  /** Run every case and report which passed. Runs the agent, so it costs credit. */
+  run(suiteUuid: string): Promise<TestSuiteRun> {
+    return this.client.request('POST', `/test-suites/${enc(suiteUuid)}/run`);
+  }
+}
+
+/**
+ * Third-party destinations - Slack, Discord, Telegram, a generic webhook, Cal.com -
+ * and the connections that hold their credentials.
+ *
+ * A connection is reachable three ways: run it directly from here, give an agent an
+ * `integration` tool that names it, or fire it from an `automations` rule.
+ */
+class Integrations {
+  readonly connections: IntegrationConnections;
+
+  constructor(private readonly client: Glytos) {
+    this.connections = new IntegrationConnections(client);
+  }
+
+  /** The catalog: what can be connected, and which actions each one offers. */
+  list(): Promise<Integration[]> {
+    return this.client.request('GET', '/integrations');
+  }
+
+  /**
+   * Run an action using the organization's stored credentials for an integration,
+   * without naming a connection. Prefer `connections.run` - this resolves whichever
+   * credentials the organization saved for that integration key, which is ambiguous
+   * once there is more than one destination.
+   */
+  run(
+    integrationKey: string,
+    body: { action: string; params?: Record<string, unknown> },
+  ): Promise<{ result: Record<string, unknown> }> {
+    return this.client.request('POST', `/integrations/${enc(integrationKey)}/run`, { body });
+  }
+}
+
+class IntegrationConnections {
+  constructor(private readonly client: Glytos) {}
+
+  /** List configured connections, optionally for one integration. */
+  list(query?: { integration_key?: string }): Promise<IntegrationConnection[]> {
+    return this.client.request('GET', '/integrations/connections', { query: query ?? {} });
+  }
+
+  /**
+   * Configure a destination. `data` carries the integration's required credentials
+   * (see `integrations.list`); they are encrypted at rest and masked on read.
+   */
+  create(body: {
+    integration_key: string;
+    name: string;
+    data: Record<string, unknown>;
+  }): Promise<IntegrationConnection> {
+    return this.client.request('POST', '/integrations/connections', { body });
+  }
+
+  /** Update a connection (only the fields you pass are changed). */
+  update(
+    connectionUuid: string,
+    body: { name?: string; data?: Record<string, unknown>; is_active?: boolean },
+  ): Promise<IntegrationConnection> {
+    return this.client.request('PATCH', `/integrations/connections/${enc(connectionUuid)}`, {
+      body,
+    });
+  }
+
+  /** Delete a connection. Automations pointing at it stop firing. */
+  delete(connectionUuid: string): Promise<void> {
+    return this.client.request('DELETE', `/integrations/connections/${enc(connectionUuid)}`);
+  }
+
+  /** Run one of the integration's actions through this connection. */
+  run(
+    connectionUuid: string,
+    body: { action: string; params?: Record<string, unknown> },
+  ): Promise<{ result: Record<string, unknown> }> {
+    return this.client.request('POST', `/integrations/connections/${enc(connectionUuid)}/run`, {
+      body,
+    });
+  }
+}
+
+/**
+ * "When this happens, do that": a webhook event fires an integration action, with
+ * no server of your own.
+ *
+ * Automations run in the background after the event, never during a call, and a
+ * failed automation is recorded rather than allowed to affect the call.
+ */
+class Automations {
+  constructor(private readonly client: Glytos) {}
+
+  /** List your automations. */
+  list(): Promise<Automation[]> {
+    return this.client.request('GET', '/automations');
+  }
+
+  /**
+   * Create a rule. `trigger_event` is a webhook event type (see `webhooks.events`),
+   * and `payload_template` values may reference the event with `{{placeholders}}`.
+   */
+  create(body: {
+    name: string;
+    trigger_event: string;
+    connection_uuid: string;
+    action: string;
+    payload_template?: Record<string, unknown>;
+    conditions?: Record<string, unknown>;
+  }): Promise<Automation> {
+    return this.client.request('POST', '/automations', { body });
+  }
+
+  /** Update an automation, including pausing it with `is_active: false`. */
+  update(
+    automationUuid: string,
+    body: {
+      name?: string;
+      trigger_event?: string;
+      connection_uuid?: string;
+      action?: string;
+      payload_template?: Record<string, unknown>;
+      conditions?: Record<string, unknown>;
+      is_active?: boolean;
+    },
+  ): Promise<Automation> {
+    return this.client.request('PATCH', `/automations/${enc(automationUuid)}`, { body });
+  }
+
+  /** Delete an automation. */
+  delete(automationUuid: string): Promise<void> {
+    return this.client.request('DELETE', `/automations/${enc(automationUuid)}`);
+  }
+
+  /** Recent firings, newest first: what ran, and what came back. */
+  runs(automationUuid: string, query?: { limit?: number }): Promise<AutomationRun[]> {
+    return this.client.request('GET', `/automations/${enc(automationUuid)}/runs`, {
+      query: query ?? {},
+    });
+  }
+
+  /**
+   * Fire it once against a payload you supply, to see the rendered parameters and
+   * the destination's reply before trusting it to a real event.
+   */
+  test(
+    automationUuid: string,
+    payload?: Record<string, unknown>,
+  ): Promise<{ params: Record<string, unknown>; result: Record<string, unknown> }> {
+    return this.client.request('POST', `/automations/${enc(automationUuid)}/test`, {
+      body: { payload: payload ?? {} },
+    });
+  }
+}
+
+/** Credit balance, ledger and usage. */
+class Billing {
+  constructor(private readonly client: Glytos) {}
+
+  /** The current prepaid balance. Check it before a large outbound run. */
+  credits(): Promise<CreditBalance> {
+    return this.client.request('GET', '/billing/credits');
+  }
+
+  /** The credit ledger: top-ups and debits, newest first. */
+  transactions(query?: { kind?: string; limit?: number }): Promise<CreditTransaction[]> {
+    return this.client.request('GET', '/billing/credits/transactions', { query: query ?? {} });
+  }
+
+  /** Aggregate usage and cost for the organization. */
+  usage(): Promise<UsageSummary> {
+    return this.client.request('GET', '/billing/usage');
+  }
+}
+
+/**
+ * Development, Staging and Production.
+ *
+ * Pass a `kind` or a uuid as the client's `environment` option to scope reads and
+ * calls; agents are always created in Development whatever it is set to.
+ */
+class Environments {
+  constructor(private readonly client: Glytos) {}
+
+  /** The organization's three environments. */
+  list(): Promise<Environment[]> {
+    return this.client.request('GET', '/environments');
+  }
+}
+
+/** The model, transcriber and voice catalog, and what each provider offers. */
+class Providers {
+  constructor(private readonly client: Glytos) {}
+
+  /** Every provider, its models and voices, and whether it is available to you. */
+  list(): Promise<Provider[]> {
+    return this.client.request('GET', '/providers');
+  }
+
+  /**
+   * A single provider's live models and voices, fetched from the provider itself
+   * where it publishes them. `language` narrows a long voice list.
+   */
+  resources(
+    serviceType: string,
+    key: string,
+    query?: { language?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.client.request('GET', `/providers/${enc(serviceType)}/${enc(key)}/resources`, {
+      query: query ?? {},
+    });
+  }
+}
+
+/** Keys for calling this API. */
+class ApiKeys {
+  constructor(private readonly client: Glytos) {}
+
+  /** List the keys on the organization. Secrets are never returned. */
+  list(): Promise<ApiKey[]> {
+    return this.client.request('GET', '/api-keys');
+  }
+
+  /**
+   * Create a key. The secret is in the response and nowhere else, so store it now.
+   *
+   * `scopes` bounds what the key may do and cannot exceed what you hold. Omit it
+   * and the key inherits your permissions, which means it stops working if you
+   * leave the organization. `expires_in_days` retires the key on its own.
+   */
+  create(body: {
+    name: string;
+    expires_in_days?: number;
+    scopes?: string[];
+  }): Promise<CreatedApiKey> {
+    return this.client.request('POST', '/api-keys', { body });
+  }
+
+  /** Revoke a key immediately. */
+  delete(keyId: number | string): Promise<void> {
+    return this.client.request('DELETE', `/api-keys/${enc(String(keyId))}`);
+  }
+}
+
+/** The organization this key belongs to, and the regions data can live in. */
+class Organizations {
+  constructor(private readonly client: Glytos) {}
+
+  /** The organization behind this API key. */
+  retrieve(): Promise<Organization> {
+    return this.client.request('GET', '/organization');
+  }
+
+  /** Rename the organization. Its region is fixed at creation and cannot change. */
+  update(body: { name?: string }): Promise<Organization> {
+    return this.client.request('PATCH', '/organization', { body });
+  }
+
+  /**
+   * The regions this deployment offers. Each is a separate stack with its own base
+   * URL, so reaching an organization in another region means pointing `baseUrl`
+   * there with a key issued there.
+   */
+  regions(): Promise<Region[]> {
+    return this.client.request('GET', '/regions');
   }
 }
 
@@ -638,13 +1211,21 @@ class PhoneNumbers {
     return this.client.request('GET', '/telephony/providers');
   }
 
-  /** Import (connect) a number you already own at a carrier. */
+  /**
+   * Import (connect) a number you already own at a carrier.
+   *
+   * Importing verifies you own the number, so the organization's own carrier
+   * credentials are required. Pass `sip_trunk_uuid` instead when the number
+   * arrives over a SIP trunk you registered - there is no carrier account to
+   * look it up in, and the trunk's registration is the ownership proof.
+   */
   importNumber(body: {
     e164: string;
     provider?: string;
     provider_sid?: string;
     credentials?: Record<string, unknown>;
     workflow_uuid?: string;
+    sip_trunk_uuid?: string;
   }): Promise<PhoneNumber> {
     return this.client.request('POST', '/telephony/numbers/import', { body });
   }
@@ -1088,6 +1669,27 @@ class Imports {
     return this.client.request('POST', `/imports/${enc(source)}`, { body: { payload } });
   }
 
+  /**
+   * List what is on the other platform, using its API key. The key is used for
+   * this request and is never stored.
+   */
+  connect(source: string, apiKey: string): Promise<{ agents: Array<Record<string, unknown>> }> {
+    return this.client.request('POST', `/imports/${enc(source)}/connect`, {
+      body: { api_key: apiKey },
+    });
+  }
+
+  /** Bring over the agents you picked from `connect`. */
+  pull(
+    source: string,
+    apiKey: string,
+    agentIds: string[],
+  ): Promise<{ imports: Array<Record<string, unknown>> }> {
+    return this.client.request('POST', `/imports/${enc(source)}/pull`, {
+      body: { api_key: apiKey, agent_ids: agentIds },
+    });
+  }
+
   /** Bring over an assistant definition, tools and all. */
   assistant(assistant: Record<string, unknown>): Promise<unknown> {
     return this.client.request('POST', '/imports/openai-assistant', { body: { assistant } });
@@ -1102,10 +1704,16 @@ class Tools {
     return this.client.request('GET', '/tools');
   }
 
-  /** Create a tool. `kind` is `"http"`, `"static"`, or `"mcp"`. */
+  /**
+   * Create a tool. `kind` is one of `http`, `static`, `mcp`, `code`,
+   * `integration` or `client`.
+   *
+   * An `integration` tool names the connection in its own `config`, so the model
+   * fills in arguments but never chooses the destination.
+   */
   create(body: {
     name: string;
-    kind: 'http' | 'static' | 'mcp';
+    kind: ToolKind;
     description?: string;
     config?: Record<string, unknown>;
     parameters?: Record<string, unknown>;
@@ -1119,7 +1727,7 @@ class Tools {
     body: {
       name?: string;
       description?: string;
-      kind?: 'http' | 'static' | 'mcp';
+      kind?: ToolKind;
       config?: Record<string, unknown>;
       parameters?: Record<string, unknown>;
     },
@@ -1130,6 +1738,20 @@ class Tools {
   /** Delete a tool. */
   delete(toolUuid: string): Promise<void> {
     return this.client.request('DELETE', `/tools/${enc(toolUuid)}`);
+  }
+
+  /**
+   * Ask an MCP server what it publishes, so a tool can be built from the server's
+   * own schema instead of one transcribed by hand.
+   */
+  async discoverMcp(body: {
+    server_url: string;
+    headers?: Record<string, string>;
+  }): Promise<McpTool[]> {
+    const resp = await this.client.request<{ tools?: McpTool[] }>('POST', '/tools/mcp/discover', {
+      body,
+    });
+    return resp?.tools ?? [];
   }
 }
 
@@ -1149,6 +1771,16 @@ class KnowledgeBase {
     chunk_overlap?: number;
   }): Promise<KnowledgeDocument> {
     return this.client.request('POST', '/knowledge-base/documents', { body });
+  }
+
+  /** Retrieve one document, including its extracted text. */
+  retrieveDocument(documentId: number | string): Promise<KnowledgeDocument> {
+    return this.client.request('GET', `/knowledge-base/documents/${enc(String(documentId))}`);
+  }
+
+  /** Delete a document, with its chunks and embeddings. */
+  deleteDocument(documentId: number | string): Promise<void> {
+    return this.client.request('DELETE', `/knowledge-base/documents/${enc(String(documentId))}`);
   }
 
   /** Upload a document file (txt, md, pdf) instead of pasting its text. */
@@ -1237,6 +1869,8 @@ export class Glytos {
   readonly imports: Imports;
   readonly calls: Calls;
   readonly phoneNumbers: PhoneNumbers;
+  /** BYO SIP trunks, for connecting a carrier directly. */
+  readonly sipTrunks: SipTrunks;
   readonly sessions: Sessions;
   readonly webhooks: Webhooks;
   readonly campaigns: Campaigns;
@@ -1247,6 +1881,22 @@ export class Glytos {
   readonly knowledgeBase: KnowledgeBase;
   readonly vectorStores: VectorStores;
   readonly analytics: Analytics;
+  /** Saved conversations replayed against an agent, to catch regressions. */
+  readonly testSuites: TestSuites;
+  /** Third-party destinations and the connections holding their credentials. */
+  readonly integrations: Integrations;
+  /** Fire an integration action when an event happens. */
+  readonly automations: Automations;
+  /** Credit balance, ledger and usage. */
+  readonly billing: Billing;
+  /** Development, Staging and Production. */
+  readonly environments: Environments;
+  /** The model, transcriber and voice catalog. */
+  readonly providers: Providers;
+  /** Keys for calling this API. */
+  readonly apiKeys: ApiKeys;
+  /** The organization behind this key, and the available regions. */
+  readonly organizations: Organizations;
 
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -1272,6 +1922,7 @@ export class Glytos {
     this.imports = new Imports(this);
     this.calls = new Calls(this);
     this.phoneNumbers = new PhoneNumbers(this);
+    this.sipTrunks = new SipTrunks(this);
     this.sessions = new Sessions(this);
     this.webhooks = new Webhooks(this);
     this.campaigns = new Campaigns(this);
@@ -1281,6 +1932,14 @@ export class Glytos {
     this.knowledgeBase = new KnowledgeBase(this);
     this.vectorStores = new VectorStores(this);
     this.analytics = new Analytics(this);
+    this.testSuites = new TestSuites(this);
+    this.integrations = new Integrations(this);
+    this.automations = new Automations(this);
+    this.billing = new Billing(this);
+    this.environments = new Environments(this);
+    this.providers = new Providers(this);
+    this.apiKeys = new ApiKeys(this);
+    this.organizations = new Organizations(this);
   }
 
   /**

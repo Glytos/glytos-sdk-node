@@ -77,20 +77,29 @@ const glytos = new Glytos({ apiKey: '...', baseUrl: 'https://api.glytos.com/api/
 
 | Namespace | Methods |
 | --- | --- |
-| `glytos.agents` (alias `workflows`) | `list`, `retrieve`, `create`, `rename`, `publish`, `promote`, `duplicate`, `archive`, `delete`, `templates`, `export`, `moveToFolder`, `removeFromFolder`, `versions`, `startSession`, `sendMessage`, `streamMessage`, `runText` |
+| `glytos.agents` (alias `workflows`) | `list`, `retrieve`, `create`, `rename`, `publish`, `promote`, `duplicate`, `archive`, `unarchive`, `delete`, `templates`, `export`, `moveToFolder`, `removeFromFolder`, `versions`, `updateConfig`, `updateDefinition`, `startSession`, `sendMessage`, `streamMessage`, `runText`, `session`, `sessionEvents` |
 | `glytos.threads` | `create`, `retrieve`, `messages.create`, `messages.list`, `runs.create`, `runs.stream` |
 | `glytos.folders` | `list`, `create`, `rename`, `delete` |
-| `glytos.imports` | `sources`, `create`, `assistant` |
+| `glytos.imports` | `sources`, `create`, `connect`, `pull`, `assistant` |
 | `glytos.chat` | `token`, `messages`, `stream`, `uploadFile` |
 | `glytos.calls` | `create`, `list`, `retrieve`, `webToken`, `control` |
-| `glytos.phoneNumbers` | `search`, `list`, `provision`, `import`, `assign`, `release`, `providers` |
-| `glytos.knowledgeBase` | `listDocuments`, `createDocument`, `uploadDocument`, `search` |
+| `glytos.phoneNumbers` | `search`, `list`, `provision`, `importNumber`, `instant`, `assign`, `release`, `providers` |
+| `glytos.sipTrunks` | `presets`, `list`, `create`, `update`, `delete`, `test` |
+| `glytos.knowledgeBase` | `listDocuments`, `createDocument`, `uploadDocument`, `retrieveDocument`, `deleteDocument`, `search` |
 | `glytos.vectorStores` | `list`, `create`, `retrieve`, `delete`, `uploadDocument` |
-| `glytos.tools` | `list`, `create`, `retrieve`, `update`, `delete` |
+| `glytos.tools` | `list`, `create`, `update`, `delete`, `discoverMcp` |
 | `glytos.campaigns` | `list`, `create`, `retrieve`, `start`, `stop`, `delete`, `addContacts`, `syncContacts`, `previewSuppression` |
 | `glytos.dnc` | `list`, `add`, `import`, `setScope`, `remove` |
+| `glytos.integrations` | `list`, `run`, `connections.list`, `connections.create`, `connections.update`, `connections.delete`, `connections.run` |
+| `glytos.automations` | `list`, `create`, `update`, `delete`, `runs`, `test` |
+| `glytos.testSuites` | `list`, `create`, `delete`, `run` |
 | `glytos.sessions` | `list` |
 | `glytos.analytics` | `overview` |
+| `glytos.billing` | `credits`, `transactions`, `usage` |
+| `glytos.environments` | `list` |
+| `glytos.providers` | `list`, `resources` |
+| `glytos.apiKeys` | `list`, `create`, `delete` |
+| `glytos.organizations` | `retrieve`, `update`, `regions` |
 | `glytos.webhooks` | `list`, `create`, `update`, `delete`, `events`, `deliveries`, `redeliver`, `verify` |
 
 `agents` and `workflows` are the same resource under two names: the product calls
@@ -159,6 +168,47 @@ console.log(
   `${preview.caller_requested} asked us not to call`,
 );
 ```
+
+Check the balance before a long run - a call is refused below the minimum, so a
+campaign that runs out simply stops:
+
+```ts
+const { balance, currency } = await glytos.billing.credits();
+```
+
+## Acting on other systems
+
+An **integration** is a destination - Slack, Discord, Telegram, a webhook of your
+own, Cal.com - and a **connection** holds one set of its credentials. An
+organization can have several connections per integration, so a rule names the
+connection rather than the integration.
+
+```ts
+const connection = await glytos.integrations.connections.create({
+  integration_key: 'slack',
+  name: 'Sales channel',
+  data: { webhook_url: process.env.SLACK_WEBHOOK_URL! },
+});
+```
+
+From there a connection is reachable three ways: run it directly, give an agent an
+`integration` tool that names it so the model can act mid-conversation, or fire it
+from an automation when an event happens.
+
+```ts
+await glytos.automations.create({
+  name: 'Tell sales about every call',
+  trigger_event: 'session.completed',
+  connection_uuid: connection.uuid,
+  action: 'post_message',
+  payload_template: { text: 'Call from {{from_number}}: {{summary}}' },
+});
+```
+
+Automations run after the event, never during the call, and a failure is recorded
+rather than allowed to affect the conversation. `automations.test` fires one
+against a payload you supply so you can see the rendered parameters and the
+destination's reply before trusting it to a real event.
 
 ## Errors
 

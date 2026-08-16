@@ -4,6 +4,44 @@ All notable changes to this project are documented in this file. The format is b
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `sipTrunks` - connect a carrier directly over SIP, with no third party in
+  between: `presets`, `list`, `create`, `update`, `delete`, `test`. Numbers are
+  attached to a registered trunk through `phoneNumbers.importNumber`, which now
+  accepts `sip_trunk_uuid`.
+- `integrations` and `integrations.connections` - the destinations an agent or an
+  automation can act on, and the named connections holding their credentials.
+- `automations` - fire an integration action when an event happens:
+  `list`, `create`, `update`, `delete`, `runs`, `test`.
+- `testSuites` - `list`, `create`, `delete`, `run`.
+- `billing` - `credits`, `transactions`, `usage`. Checking the balance before a
+  long outbound run no longer needs a raw `request` call.
+- `environments.list`, `providers.list`, `providers.resources`, `apiKeys.list`
+  /`create`/`delete`, `organizations.retrieve`/`update`/`regions`.
+- `knowledgeBase.retrieveDocument` and `knowledgeBase.deleteDocument`. Documents
+  could be created and listed but never read back or removed.
+- `tools.discoverMcp` - ask an MCP server what it publishes, instead of
+  transcribing its schema by hand.
+- `imports.connect` and `imports.pull` - list the agents on another platform with
+  its API key, then bring over the ones you pick. The key is never stored.
+- `workflows.create` accepts `primary_channel`.
+
+### Fixed
+
+- `tools.create` and `tools.update` rejected three kinds the API accepts. The
+  union was `http | static | mcp`; it is now the full
+  `static | http | mcp | code | integration | client`, so a `code` or
+  `integration` tool no longer fails to compile.
+- `calls.control` took an untyped object. It now spells out the three actions and
+  what each one requires, so a `say` without text is a compile error rather than
+  a 422.
+- The README listed a `tools.retrieve` that does not exist and named
+  `phoneNumbers.import` rather than `importNumber`, and its agent row was missing
+  several methods that have shipped for a while.
+
 ## [0.3.0] - 2026-08-09
 
 ### Added
