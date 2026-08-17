@@ -903,6 +903,14 @@ class TestSuites {
     return this.client.request('POST', '/test-suites', { body });
   }
 
+  /** Rename a suite, repoint it at another agent, or rewrite its cases. */
+  update(
+    suiteUuid: string,
+    body: { name?: string; workflow_uuid?: string; cases?: Array<Record<string, unknown>> },
+  ): Promise<TestSuite> {
+    return this.client.request('PUT', `/test-suites/${enc(suiteUuid)}`, { body });
+  }
+
   /** Delete a suite. */
   delete(suiteUuid: string): Promise<void> {
     return this.client.request('DELETE', `/test-suites/${enc(suiteUuid)}`);

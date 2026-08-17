@@ -169,6 +169,18 @@ describe('testSuites', () => {
     expect(pathOf(capture)).toMatch(/\/test-suites\/s1\/run$/);
     expect(result.passed_count).toBe(2);
   });
+
+  it('update rewrites the cases in place', async () => {
+    const capture: Capture = {};
+    await client(
+      capture,
+      '{"uuid":"s1","workflow_uuid":"w1","name":"After","cases":[]}',
+    ).testSuites.update('s1', { name: 'After', cases: [] });
+
+    expect(capture.request?.method).toBe('PUT');
+    expect(pathOf(capture)).toMatch(/\/test-suites\/s1$/);
+    expect(await capture.request!.json()).toEqual({ name: 'After', cases: [] });
+  });
 });
 
 describe('billing', () => {
