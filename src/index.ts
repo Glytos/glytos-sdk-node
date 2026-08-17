@@ -1835,6 +1835,14 @@ class VectorStores {
     return this.client.request('DELETE', `/vector-stores/${enc(vectorStoreUuid)}`);
   }
 
+  /** Take a document out of a store. The document itself is not deleted. */
+  removeDocument(vectorStoreUuid: string, documentId: number): Promise<void> {
+    return this.client.request(
+      'DELETE',
+      `/vector-stores/${enc(vectorStoreUuid)}/documents/${documentId}`,
+    );
+  }
+
   /** Add a document file to a vector store, so an agent can search it. */
   uploadDocument(
     vectorStoreUuid: string,
