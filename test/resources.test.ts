@@ -298,3 +298,45 @@ describe('environments and providers', () => {
     expect(searchOf(capture)).toBe('?language=tr');
   });
 });
+
+describe('campaigns', () => {
+  it('update patches only what it is given', async () => {
+    const capture: Capture = {};
+    await client(capture).campaigns.update('camp-1', { name: 'Renamed' });
+
+    expect(capture.request?.method).toBe('PATCH');
+    expect(pathOf(capture)).toMatch(/\/telephony\/campaigns\/camp-1$/);
+    expect(await capture.request!.json()).toEqual({ name: 'Renamed' });
+  });
+
+  it('unschedule sends the null that absence cannot express', async () => {
+    const capture: Capture = {};
+    await client(capture).campaigns.unschedule('camp-1');
+
+    expect(capture.request?.method).toBe('PATCH');
+    expect(await capture.request!.json()).toEqual({ scheduled_at: null });
+  });
+
+  it('duplicate posts to the campaign it copies', async () => {
+    const capture: Capture = {};
+    await client(capture).campaigns.duplicate('camp-1', 'Second run');
+
+    expect(capture.request?.method).toBe('POST');
+    expect(pathOf(capture)).toMatch(/\/telephony\/campaigns\/camp-1\/duplicate$/);
+    expect(await capture.request!.json()).toEqual({ name: 'Second run' });
+  });
+
+  it('export returns the CSV as text rather than trying to parse it', async () => {
+    const capture: Capture = {};
+    const csv = `phone,outcome,dialed_at,error,session_uuid
++905551112233,answered,,,run-1
+`;
+    const glytos = new Glytos({
+      apiKey: 'gly_test',
+      fetch: stubFetch(csv, { status: 200 }, capture),
+    });
+
+    await expect(glytos.campaigns.export('camp-1')).resolves.toBe(csv);
+    expect(pathOf(capture)).toMatch(/\/telephony\/campaigns\/camp-1\/export$/);
+  });
+});

@@ -8,6 +8,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `campaigns.update`, `campaigns.unschedule`, `campaigns.duplicate` and
+  `campaigns.export`. A rename is accepted at any point; the schedule and the
+  calling window can only be changed before a campaign starts. `unschedule` is
+  separate because omitting a field and clearing it are different instructions.
+- `Campaign` now carries `counts` and `workflow_name`, and the create response
+  carries `imported`. Measure progress against `counts.dialable` rather than
+  `counts.total`: suppressed numbers are never dialed.
+- `ContactSyncResult` gained `duplicates` and `on_do_not_call`.
+
 - `sipTrunks` - connect a carrier directly over SIP, with no third party in
   between: `presets`, `list`, `create`, `update`, `delete`, `test`. Numbers are
   attached to a registered trunk through `phoneNumbers.importNumber`, which now

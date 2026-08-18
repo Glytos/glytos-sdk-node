@@ -88,7 +88,7 @@ const glytos = new Glytos({ apiKey: '...', baseUrl: 'https://api.glytos.com/api/
 | `glytos.knowledgeBase` | `listDocuments`, `createDocument`, `uploadDocument`, `retrieveDocument`, `deleteDocument`, `search` |
 | `glytos.vectorStores` | `list`, `create`, `retrieve`, `delete`, `uploadDocument` |
 | `glytos.tools` | `list`, `create`, `update`, `delete`, `discoverMcp` |
-| `glytos.campaigns` | `list`, `create`, `retrieve`, `start`, `stop`, `delete`, `addContacts`, `syncContacts`, `previewSuppression` |
+| `glytos.campaigns` | `list`, `create`, `retrieve`, `update`, `unschedule`, `duplicate`, `export`, `start`, `stop`, `delete`, `addContacts`, `syncContacts`, `previewSuppression` |
 | `glytos.dnc` | `list`, `add`, `import`, `setScope`, `remove` |
 | `glytos.integrations` | `list`, `run`, `connections.list`, `connections.create`, `connections.update`, `connections.delete`, `connections.run` |
 | `glytos.automations` | `list`, `create`, `update`, `delete`, `runs`, `test` |
@@ -143,7 +143,17 @@ const campaign = await glytos.campaigns.create({
 
 Left unscheduled, a campaign stays a draft until `start`. `stop` ends it at the
 next contact, leaving the undialed ones ready to resume. `retrieve` returns each
-contact's outcome and, where one answered, the session it produced.
+contact's outcome and, where one answered, the session it produced, and `export`
+returns the same thing as CSV.
+
+Creating a campaign returns a receipt in `imported`: how many contacts were
+added, how many were duplicates, how many rows held no usable number, which
+column they were read from, and how many are already on your do-not-call list.
+An outbound launch cannot be taken back, so it is worth reading before `start`.
+
+Every campaign carries its own `counts`. Measure progress against `dialable`
+rather than `total`: suppressed numbers are never dialed, so a finished campaign
+measured against `total` stops short of complete for good.
 
 Every outbound call is checked against your do-not-call list first, whether it
 comes from a campaign or from `calls.create`. Agents add to that list themselves

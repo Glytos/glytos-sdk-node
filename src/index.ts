@@ -136,10 +136,40 @@ export type CampaignStatus =
  */
 export type SuppressionPolicy = 'strict' | 'transactional' | 'ignore';
 
+/**
+ * How far a campaign has got. Sent with every campaign so a row can draw its
+ * progress without fetching the contact list to count it.
+ */
+export interface CampaignCounts {
+  total: number;
+  pending: number;
+  dialing: number;
+  answered: number;
+  voicemail: number;
+  no_answer: number;
+  failed: number;
+  /** On the do-not-call list, so never dialed. */
+  suppressed: number;
+  /** Handed to the carrier, including calls still in flight. Excludes suppressed. */
+  dialed: number;
+  /**
+   * What this campaign can ever dial: `total` minus `suppressed`. Measure
+   * progress against this, not against `total`, or a finished campaign stops
+   * short of complete by however many numbers were suppressed.
+   */
+  dialable: number;
+  [key: string]: unknown;
+}
+
 export interface Campaign {
   uuid: string;
   name: string;
   workflow_uuid?: string;
+  /** The agent that does the dialing, named so a row need not resolve the uuid. */
+  workflow_name?: string | null;
+  counts?: CampaignCounts;
+  /** Only on create: what reading the supplied contact list did. */
+  imported?: ContactSyncResult;
   from_number?: string;
   status?: CampaignStatus;
   /** Why a campaign stopped short of the end of its list. */
@@ -208,8 +238,16 @@ export interface ContactSyncResult {
   added: number;
   /** Already on the list. */
   skipped: number;
+  /** The same number more than once inside the file. */
+  duplicates: number;
   /** Held no usable phone number. */
   rejected: number;
+  /**
+   * Of what was added, how many are on the do-not-call list and so will never
+   * be dialed. Counted here purely to report it; suppression happens at dial
+   * time.
+   */
+  on_do_not_call: number;
   /**
    * The column read as the phone number, so a file read from the wrong one is
    * distinguishable from one that could not be read at all.
@@ -1390,6 +1428,59 @@ class Campaigns {
    */
   stop(campaignUuid: string): Promise<Campaign> {
     return this.client.request('POST', `/telephony/campaigns/${enc(campaignUuid)}/stop`);
+  }
+
+  /**
+   * Rename a campaign, or change when and within what hours it dials.
+   *
+   * A rename is accepted at any point. The schedule and the calling window can
+   * only be changed before the campaign starts: moving the start of one already
+   * dialing would say nothing about the calls it has placed.
+   */
+  update(
+    campaignUuid: string,
+    body: {
+      name?: string;
+      /** ISO 8601. To remove a schedule entirely, use `unschedule`. */
+      scheduled_at?: string;
+      /** Dialing hours ("09:00", "20:00"), read in `timezone`. Set both or neither. */
+      call_window_start?: string;
+      call_window_end?: string;
+      timezone?: string;
+    },
+  ): Promise<Campaign> {
+    return this.client.request('PATCH', `/telephony/campaigns/${enc(campaignUuid)}`, { body });
+  }
+
+  /**
+   * Clear a campaign's schedule, returning it to a draft that waits for `start`.
+   * Separate from `update` because leaving a field out and setting it to nothing
+   * are different instructions, and only one of them can be expressed by absence.
+   */
+  unschedule(campaignUuid: string): Promise<Campaign> {
+    return this.client.request('PATCH', `/telephony/campaigns/${enc(campaignUuid)}`, {
+      body: { scheduled_at: null },
+    });
+  }
+
+  /**
+   * Copy a campaign and its contact list into a fresh draft. Nothing dials and
+   * no outcome is copied, so this is how you run the same list again or reuse a
+   * setup against a new one.
+   */
+  duplicate(campaignUuid: string, name?: string): Promise<Campaign> {
+    return this.client.request('POST', `/telephony/campaigns/${enc(campaignUuid)}/duplicate`, {
+      body: { name },
+    });
+  }
+
+  /**
+   * The contacts and what came of each, as CSV: phone, outcome, dialed_at,
+   * error, session_uuid. The session uuid joins a result back to the
+   * conversation that produced it.
+   */
+  export(campaignUuid: string): Promise<string> {
+    return this.client.request('GET', `/telephony/campaigns/${enc(campaignUuid)}/export`);
   }
 
   /** Remove a campaign and its contact list. A running campaign is stopped first. */
